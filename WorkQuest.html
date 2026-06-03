@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#0d0d1a" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />
   <title>WorkQuest</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -11,9 +15,14 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body, #root { height: 100%; }
-    body { font-family: "DM Sans", sans-serif; }
+    body { font-family: "DM Sans", sans-serif; overflow-x: hidden; }
     button { font-family: "DM Sans", sans-serif; }
     input, textarea, select { font-family: "DM Sans", sans-serif; }
+    * { -webkit-tap-highlight-color: transparent; }
+    @keyframes slideUpSheet { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    @keyframes slideInRight { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+    /* macOS: shift nav content right so it clears the traffic-light buttons */
+    body.electron-mac nav { padding-left: 80px !important; }
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--wq-border); border-radius: 3px; }
@@ -57,8 +66,8 @@
     }
   </style>
 
-  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <!-- Supabase JS client (UMD — no bundler needed) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
@@ -153,6 +162,43 @@ function NavItem({ label, active, onClick, badge }) {
       )}
     </button>
   );
+}
+
+// ── Viewport context ──────────────────────────────────────────
+const ViewportCtx = React.createContext({ isMobile: false, width: 1280 });
+function ViewportProvider({ children }) {
+  const [width, setWidth] = React.useState(window.innerWidth);
+  React.useEffect(() => {
+    const fn = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', fn);
+    return () => window.removeEventListener('resize', fn);
+  }, []);
+  return (
+    <ViewportCtx.Provider value={{ isMobile: width < 768, width }}>
+      {children}
+    </ViewportCtx.Provider>
+  );
+}
+function useViewport() { return React.useContext(ViewportCtx); }
+
+// ── Error boundary ────────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e) { return { error: e }; }
+  componentDidCatch(e, info) { console.error('WorkQuest error:', e, info.componentStack); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", flexDirection:"column", gap:14, padding:32, textAlign:"center" }}>
+          <div style={{ fontSize:44 }}>⚠️</div>
+          <div style={{ fontFamily:"Sora,sans-serif", fontWeight:700, fontSize:17, color:"var(--wq-muted)" }}>Something went wrong</div>
+          <div style={{ fontSize:13, color:"var(--wq-faint)", maxWidth:300, lineHeight:1.7 }}>{this.state.error.message || "An unexpected error occurred."}</div>
+          <button onClick={() => this.setState({ error: null })} style={{ background:"var(--wq-accent)", color:"#fff", border:"none", borderRadius:10, padding:"11px 26px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"Sora,sans-serif" }}>Try Again</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 // ── Supabase config modal ──────────────────────────────────────
@@ -370,10 +416,11 @@ function AuthBtn({ label, onClick, secondary, disabled }) {
   );
 }
 
-function AuthModal({ onClose, currentUser, onSignOut }) {
-  const [tab, setTab] = React.useState(currentUser ? "account" : "signin");
+function AuthModal({ onClose, currentUser, onSignOut, passwordRecovery, onPasswordReset }) {
+  const [tab, setTab] = React.useState(passwordRecovery ? "reset" : currentUser ? "account" : "signin");
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
+  const [newPassword, setNewPassword] = React.useState("");
   const [status, setStatus] = React.useState("idle"); // idle | loading | success | error
   const [msg, setMsg] = React.useState("");
 
@@ -437,6 +484,19 @@ function AuthModal({ onClose, currentUser, onSignOut }) {
     const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.href });
     if (error) { setStatus("error"); setMsg(friendlyError(error.message)); }
     else { setStatus("success"); setMsg("Password reset email sent — check your inbox."); }
+  }
+
+  async function handleSetNewPassword() {
+    if (!sb) return;
+    if (!newPassword || newPassword.length < 8) { setStatus("error"); setMsg("Password must be at least 8 characters."); return; }
+    setStatus("loading"); setMsg("");
+    const { error } = await sb.auth.updateUser({ password: newPassword });
+    if (error) { setStatus("error"); setMsg(friendlyError(error.message)); }
+    else {
+      setStatus("success"); setMsg("Password updated! You're now signed in.");
+      onPasswordReset && onPasswordReset();
+      setTimeout(() => { setTab("account"); setStatus("idle"); setMsg(""); }, 1400);
+    }
   }
 
   const isEmailNotConfirmed = status === "error" && msg.includes("confirm your email");
@@ -541,6 +601,17 @@ function AuthModal({ onClose, currentUser, onSignOut }) {
             </>
           )}
 
+          {/* Set new password (after clicking password reset email link) */}
+          {tab === "reset" && (
+            <>
+              <div style={{ background:"var(--wq-accent-bg)", borderRadius:10, padding:"12px 14px", fontSize:13, color:"var(--wq-accent-text)", lineHeight:1.5 }}>
+                🔐 You clicked a password reset link. Enter your new password below.
+              </div>
+              <AuthInput value={newPassword} onChange={setNewPassword} placeholder="New password (8+ chars)" type="password" />
+              <AuthBtn label={status==="loading"?"Updating…":"Set New Password"} onClick={handleSetNewPassword} disabled={status==="loading"} />
+            </>
+          )}
+
           {/* Status message */}
           {msg && (
             <div style={{ background: status==="error" ? "#fee2e2" : "#d1fae5", border:`1.5px solid ${status==="error"?"#fecaca":"#6ee7b7"}`, borderRadius:10, padding:"10px 14px", fontSize:12, color: status==="error" ? "#991b1b" : "#065f46", lineHeight:1.5 }}>
@@ -568,16 +639,29 @@ function App() {
   const [showAuth, setShowAuth] = React.useState(false);
   const [currentUser, setCurrentUser] = React.useState(null);
   const [isConnected, setIsConnected] = React.useState(!!getStoredCreds().url && !!getStoredCreds().key);
+  const [passwordRecovery, setPasswordRecovery] = React.useState(false);
+  const { isMobile } = useViewport();
 
-  // Listen for auth state changes from Supabase
   React.useEffect(() => {
     const sb = getSupabase();
     if (!sb) return;
     sb.auth.getSession().then(({ data }) => {
       setCurrentUser(data?.session?.user ?? null);
+      // Strip auth tokens/codes from the URL bar after Supabase processes them
+      if (window.location.hash.includes('access_token') || window.location.search.includes('code=')) {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
     });
-    const { data: { subscription } } = sb.auth.onAuthStateChange((_evt, session) => {
+    const { data: { subscription } } = sb.auth.onAuthStateChange((event, session) => {
       setCurrentUser(session?.user ?? null);
+      if (event === 'SIGNED_IN') {
+        window.history.replaceState(null, '', window.location.pathname);
+        setShowAuth(false);
+      }
+      if (event === 'PASSWORD_RECOVERY') {
+        setPasswordRecovery(true);
+        setShowAuth(true);
+      }
     });
     return () => subscription.unsubscribe();
   }, [isConnected]);
@@ -592,13 +676,16 @@ function App() {
   }, [tweaks.accentColor]);
 
   const isCompany = tweaks.view === "company";
-  const seekerTabs = [["browse","Browse Jobs"],["saved","Saved"],["profile","My Profile"]];
+  const seekerTabs = [["browse","Browse"],["saved","Saved"],["profile","Profile"]];
   const companyTabs = [["dashboard","Dashboard"],["listings","Listings","1"],["applicants","Applicants"]];
+  const allTabs = isCompany ? companyTabs : seekerTabs;
 
-  // User initials for avatar
   const userInitials = currentUser
     ? (currentUser.email || '').substring(0, 2).toUpperCase()
     : (isCompany ? "AC" : "AJ");
+
+  const activeTab = isCompany ? companyTab : seekerTab;
+  const setActiveTab = isCompany ? setCompanyTab : setSeekerTab;
 
   const mainContent = () => {
     if (isCompany) {
@@ -611,51 +698,101 @@ function App() {
     }
   };
 
+  const tabIcons = {
+    browse:     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+    saved:      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>,
+    profile:    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+    dashboard:  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>,
+    listings:   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="9" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="9" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.5" fill="currentColor" stroke="none"/></svg>,
+    applicants: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+  };
+
   return (
     <div style={{ display:"flex", flexDirection:"column", height:"100vh", background:"var(--wq-bg)" }}>
-      <nav style={{ height:60, background:"var(--wq-surface)", borderBottom:"1.5px solid var(--wq-border-light)", display:"flex", alignItems:"center", padding:"0 24px", gap:20, flexShrink:0, zIndex:20 }}>
+
+      {/* ── Top Navigation ── */}
+      <nav style={{ height: isMobile ? 52 : 60, background:"var(--wq-surface)", borderBottom:"1.5px solid var(--wq-border-light)", display:"flex", alignItems:"center", padding: isMobile ? "0 14px" : "0 24px", gap: isMobile ? 8 : 20, flexShrink:0, zIndex:20 }}>
         <Logo />
-        <div style={{ flex:1, display:"flex", justifyContent:"center", gap:2 }}>
-          {(isCompany ? companyTabs : seekerTabs).map(([id,label,badge]) => (
-            <NavItem key={id} label={label} badge={badge}
-              active={isCompany ? companyTab===id : seekerTab===id}
-              onClick={() => isCompany ? setCompanyTab(id) : setSeekerTab(id)} />
-          ))}
-        </div>
+
+        {/* Desktop: center tab navigation */}
+        {!isMobile && (
+          <div style={{ flex:1, display:"flex", justifyContent:"center", gap:2 }}>
+            {allTabs.map(([id,label,badge]) => (
+              <NavItem key={id} label={label} badge={badge}
+                active={activeTab === id}
+                onClick={() => setActiveTab(id)} />
+            ))}
+          </div>
+        )}
+
+        {isMobile && <div style={{ flex:1 }} />}
 
         {/* View switcher */}
         <div style={{ display:"flex", background:"var(--wq-chip)", borderRadius:10, padding:3, gap:2 }}>
-          {[["seeker","Job Seeker"],["company","Company"]].map(([id,label]) => (
-            <button key={id} onClick={() => setTweak("view",id)} style={{ background:tweaks.view===id?"var(--wq-surface)":"transparent", border:"none", borderRadius:8, padding:"5px 12px", fontSize:12, fontWeight:tweaks.view===id?600:400, color:tweaks.view===id?"var(--wq-text)":"var(--wq-faint)", cursor:"pointer", transition:"all 0.15s", boxShadow:tweaks.view===id?"0 1px 4px rgba(0,0,0,0.08)":"none" }}>{label}</button>
+          {[["seeker", isMobile ? "Seeker" : "Job Seeker"], ["company","Company"]].map(([id,label]) => (
+            <button key={id} onClick={() => setTweak("view",id)} style={{ background:tweaks.view===id?"var(--wq-surface)":"transparent", border:"none", borderRadius:8, padding: isMobile ? "4px 8px" : "5px 12px", fontSize: isMobile ? 11 : 12, fontWeight:tweaks.view===id?600:400, color:tweaks.view===id?"var(--wq-text)":"var(--wq-faint)", cursor:"pointer", transition:"all 0.15s", boxShadow:tweaks.view===id?"0 1px 4px rgba(0,0,0,0.08)":"none" }}>{label}</button>
           ))}
         </div>
 
-        {/* Connection status chip */}
-        <button onClick={() => setShowSupabase(true)} data-connect-btn style={{ display:"flex", alignItems:"center", gap:6, background:"var(--wq-chip)", border:"1.5px solid var(--wq-border)", borderRadius:20, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:600, color:"var(--wq-muted)" }}>
-          <div style={{ width:7, height:7, borderRadius:"50%", background: isConnected ? "#10b981" : "#f59e0b" }} />
-          {isConnected ? (currentUser ? `Signed in as ${currentUser.email?.split('@')[0]}` : "Connected") : "Demo mode · Connect"}
-        </button>
+        {/* Desktop: full connection chip */}
+        {!isMobile && (
+          <button onClick={() => setShowSupabase(true)} data-connect-btn style={{ display:"flex", alignItems:"center", gap:6, background:"var(--wq-chip)", border:"1.5px solid var(--wq-border)", borderRadius:20, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:600, color:"var(--wq-muted)" }}>
+            <div style={{ width:7, height:7, borderRadius:"50%", background: isConnected ? "#10b981" : "#f59e0b" }} />
+            {isConnected ? (currentUser ? `Signed in as ${currentUser.email?.split('@')[0]}` : "Connected") : "Demo mode · Connect"}
+          </button>
+        )}
 
-        {/* Avatar → opens auth */}
-        <div onClick={() => setShowAuth(true)} style={{ width:34, height:34, borderRadius:"50%", background: currentUser ? "#10b981" : isCompany ? "linear-gradient(135deg,#f59e0b,#ef4444)" : "linear-gradient(135deg,var(--wq-accent),#8b5cf6)", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"Sora,sans-serif" }}>{userInitials}</div>
+        {/* Mobile: just the status dot */}
+        {isMobile && (
+          <button onClick={() => setShowSupabase(true)} data-connect-btn style={{ background:"none", border:"none", cursor:"pointer", padding:6, display:"flex", alignItems:"center" }}>
+            <div style={{ width:9, height:9, borderRadius:"50%", background: isConnected ? "#10b981" : "#f59e0b" }} />
+          </button>
+        )}
+
+        {/* Avatar */}
+        <div onClick={() => setShowAuth(true)} style={{ width: isMobile ? 30 : 34, height: isMobile ? 30 : 34, borderRadius:"50%", background: currentUser ? "#10b981" : isCompany ? "linear-gradient(135deg,#f59e0b,#ef4444)" : "linear-gradient(135deg,var(--wq-accent),#8b5cf6)", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize: isMobile ? 11 : 13, fontWeight:700, cursor:"pointer", fontFamily:"Sora,sans-serif", flexShrink:0 }}>{userInitials}</div>
       </nav>
 
+      {/* ── Main Content ── */}
       <div style={{ flex:1, overflow:"hidden", position:"relative" }}>
-        {mainContent()}
+        <ErrorBoundary key={activeTab}>
+          {mainContent()}
+        </ErrorBoundary>
       </div>
 
-      {showSupabase && <SupabaseModal onClose={() => setShowSupabase(false)} onConnected={() => setIsConnected(true)} />}
-      {showAuth && <AuthModal onClose={() => setShowAuth(false)} currentUser={currentUser} onSignOut={() => { getSupabase()?.auth.signOut(); setShowAuth(false); }} />}
+      {/* ── Bottom Tab Bar (mobile only) ── */}
+      {isMobile && (
+        <div style={{ flexShrink:0, background:"var(--wq-surface)", borderTop:"1.5px solid var(--wq-border-light)", display:"flex", paddingBottom:"env(safe-area-inset-bottom, 0px)", zIndex:30 }}>
+          {allTabs.map(([id, label, badge]) => {
+            const active = activeTab === id;
+            return (
+              <button key={id} onClick={() => setActiveTab(id)}
+                style={{ flex:1, background:"none", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:3, color: active ? "var(--wq-accent)" : "var(--wq-faint)", padding:"10px 0 8px", transition:"color 0.15s", position:"relative", minHeight:52 }}>
+                <div style={{ transition:"transform 0.15s", transform: active ? "scale(1.1)" : "scale(1)" }}>
+                  {tabIcons[id]}
+                </div>
+                <span style={{ fontSize:10, fontWeight: active ? 700 : 500 }}>{label}</span>
+                {badge && <div style={{ position:"absolute", top:7, left:"calc(50% + 5px)", background:"#ef4444", color:"#fff", borderRadius:10, padding:"1px 5px", fontSize:9, fontWeight:700, lineHeight:1.4 }}>{badge}</div>}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-      <TweaksPanel>
-        <TweakSection title="View">
-          <TweakRadio id="view" label="Mode" value={tweaks.view} options={[{value:"seeker",label:"Job Seeker"},{value:"company",label:"Company"}]} onChange={v=>setTweak("view",v)} />
-        </TweakSection>
-        <TweakSection title="Appearance">
-          <TweakRadio id="theme" label="Theme" value={tweaks.theme} options={[{value:"light",label:"Light"},{value:"dark",label:"Dark"}]} onChange={v=>setTweak("theme",v)} />
-          <TweakColor id="accentColor" label="Accent" value={tweaks.accentColor} onChange={v=>setTweak("accentColor",v)} />
-        </TweakSection>
-      </TweaksPanel>
+      {showSupabase && <SupabaseModal onClose={() => setShowSupabase(false)} onConnected={() => setIsConnected(true)} />}
+      {showAuth && <AuthModal onClose={() => { setShowAuth(false); setPasswordRecovery(false); }} currentUser={currentUser} onSignOut={() => { getSupabase()?.auth.signOut(); setShowAuth(false); }} passwordRecovery={passwordRecovery} onPasswordReset={() => setPasswordRecovery(false)} />}
+
+      {!isMobile && (
+        <TweaksPanel>
+          <TweakSection title="View">
+            <TweakRadio id="view" label="Mode" value={tweaks.view} options={[{value:"seeker",label:"Job Seeker"},{value:"company",label:"Company"}]} onChange={v=>setTweak("view",v)} />
+          </TweakSection>
+          <TweakSection title="Appearance">
+            <TweakRadio id="theme" label="Theme" value={tweaks.theme} options={[{value:"light",label:"Light"},{value:"dark",label:"Dark"}]} onChange={v=>setTweak("theme",v)} />
+            <TweakColor id="accentColor" label="Accent" value={tweaks.accentColor} onChange={v=>setTweak("accentColor",v)} />
+          </TweakSection>
+        </TweaksPanel>
+      )}
     </div>
   );
 }
@@ -670,7 +807,7 @@ function PlaceholderView({ name }) {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")).render(<ViewportProvider><App /></ViewportProvider>);
 </script>
 </body>
 </html>
