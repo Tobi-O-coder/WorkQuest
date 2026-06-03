@@ -1,6 +1,11 @@
 node_modules/
 dist/
 release/
+www/
 *.log
 .DS_Store
 Thumbs.db
+
+# Capacitor native projects (generated — run npx cap add to recreate)
+android/
+ios/

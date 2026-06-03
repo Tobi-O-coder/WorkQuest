@@ -6,6 +6,10 @@
   "scripts": {
     "start": "cross-env ELECTRON_RUN_AS_NODE= electron .",
     "start:win": "set ELECTRON_RUN_AS_NODE= && electron .",
+    "build": "node build.js",
+    "cap:sync": "npm run build && npx cap sync",
+    "cap:android": "npm run build && npx cap open android",
+    "cap:ios": "npm run build && npx cap open ios",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux"
@@ -65,7 +69,15 @@
       "title": "Install WorkQuest"
     }
   },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/ios": "^7.0.0",
+    "@capacitor/splash-screen": "^7.0.0",
+    "@capacitor/status-bar": "^7.0.0"
+  },
   "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
     "cross-env": "^10.1.0",
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0"
