@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WorkQuest</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    body { font-family: "DM Sans", sans-serif; }
+    button { font-family: "DM Sans", sans-serif; }
+    input, textarea, select { font-family: "DM Sans", sans-serif; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--wq-border); border-radius: 3px; }
+
+    :root {
+      --wq-bg:           #f8fafc;
+      --wq-surface:      #ffffff;
+      --wq-surface2:     #f8fafc;
+      --wq-border:       #e2e8f0;
+      --wq-border-light: #f1f5f9;
+      --wq-text:         #1e1b4b;
+      --wq-muted:        #64748b;
+      --wq-faint:        #94a3b8;
+      --wq-chip:         #f1f5f9;
+      --wq-chip-text:    #475569;
+      --wq-input-bg:     #ffffff;
+      --wq-nav:          #ffffff;
+      --wq-accent:       #6366f1;
+      --wq-accent-bg:    #eef2ff;
+      --wq-accent-text:  #4338ca;
+      --wq-modal-overlay: rgba(15,12,40,0.5);
+    }
+
+    [data-theme="dark"] {
+      --wq-bg:           #0d0d1a;
+      --wq-surface:      #161626;
+      --wq-surface2:     #1c1c32;
+      --wq-border:       #2a2a45;
+      --wq-border-light: #1e1e36;
+      --wq-text:         #e0deff;
+      --wq-muted:        #8079b8;
+      --wq-faint:        #4e4880;
+      --wq-chip:         #1e1e36;
+      --wq-chip-text:    #8079b8;
+      --wq-input-bg:     #1c1c32;
+      --wq-nav:          #12122200;
+      --wq-accent:       #818cf8;
+      --wq-accent-bg:    #1e1b4b;
+      --wq-accent-text:  #a5b4fc;
+      --wq-modal-overlay: rgba(5,4,20,0.7);
+    }
+  </style>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <!-- Supabase JS client (UMD — no bundler needed) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <!-- WorkQuest API layer (must load after Supabase, before views) -->
+  <script src="supabase/api.js"></script>
+
+  <script type="text/babel" src="tweaks-panel.jsx"></script>
+  <script type="text/babel" src="JobSeekerView.jsx"></script>
+  <script type="text/babel" src="CompanyView.jsx"></script>
+  <script type="text/babel" src="ApplicantsView.jsx"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "view": "seeker",
+  "theme": "dark",
+  "accentColor": "#636df2"
+}/*EDITMODE-END*/;
+
+// ── Supabase client (singleton) ───────────────────────────────
+const WQ_URL_KEY  = 'wq_supabase_url';
+const WQ_KEY_KEY  = 'wq_supabase_key';
+
+function getStoredCreds() {
+  return {
+    url: localStorage.getItem(WQ_URL_KEY) || '',
+    key: localStorage.getItem(WQ_KEY_KEY) || '',
+  };
+}
+
+let _supabase = null;
+function getSupabase() {
+  if (_supabase) return _supabase;
+  const { url, key } = getStoredCreds();
+  if (url && key && window.supabase) {
+    _supabase = window.supabase.createClient(url, key);
+  }
+  return _supabase;
+}
+
+async function tryConnect(url, key) {
+  try {
+    const client = window.supabase.createClient(url, key);
+    // Lightweight ping — just check auth (always works if creds are valid)
+    const { error } = await client.auth.getSession();
+    if (error) throw error;
+    // Persist and set as active client
+    localStorage.setItem(WQ_URL_KEY, url);
+    localStorage.setItem(WQ_KEY_KEY, key);
+    _supabase = client;
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e.message || 'Connection failed' };
+  }
+}
+
+function Logo() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{
+        width: 30, height: 30,
+        background: "linear-gradient(135deg, var(--wq-accent), #8b5cf6)",
+        borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M3 12 L8 4 L13 12" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M5.5 9 L10.5 9" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+        </svg>
+      </div>
+      <span style={{ fontFamily: "Sora, sans-serif", fontWeight: 800, fontSize: 18, color: "var(--wq-text)", letterSpacing: -0.5 }}>
+        Work<span style={{ color: "var(--wq-accent)" }}>Quest</span>
+      </span>
+    </div>
+  );
+}
+
+function NavItem({ label, active, onClick, badge }) {
+  return (
+    <button onClick={onClick} style={{
+      background: active ? "var(--wq-accent-bg)" : "transparent",
+      border: "none", cursor: "pointer",
+      padding: "8px 14px", borderRadius: 8,
+      fontFamily: "DM Sans, sans-serif", fontWeight: active ? 600 : 400,
+      fontSize: 14, color: active ? "var(--wq-accent)" : "var(--wq-muted)",
+      transition: "all 0.15s", display: "flex", alignItems: "center", gap: 6,
+    }}>
+      {label}
+      {badge && (
+        <span style={{ background: "#ef4444", color: "#fff", borderRadius: 10, padding: "1px 6px", fontSize: 10, fontWeight: 700 }}>{badge}</span>
+      )}
+    </button>
+  );
+}
+
+// ── Supabase config modal ──────────────────────────────────────
+function SupabaseModal({ onClose, onConnected }) {
+  const stored = getStoredCreds();
+  const [url, setUrl] = React.useState(stored.url || "https://YOUR_PROJECT_ID.supabase.co");
+  const [key, setKey] = React.useState(stored.key || "");
+  const [tab, setTab] = React.useState("connect");
+  const [status, setStatus] = React.useState(
+    stored.url && stored.key ? 'connected' : 'idle'
+  ); // idle | loading | connected | error
+  const [errMsg, setErrMsg] = React.useState('');
+
+  const connected = status === 'connected';
+
+  async function handleConnect() {
+    if (!url || !key) return;
+    setStatus('loading');
+    setErrMsg('');
+    const result = await tryConnect(url, key);
+    if (result.ok) {
+      setStatus('connected');
+      onConnected && onConnected();
+    } else {
+      setStatus('error');
+      setErrMsg(result.message);
+    }
+  }
+
+  const tabs = [["connect","🔌 Connect"],["schema","🗄 Schema"],["api","⚙️ API Usage"],["cron","⏰ Cron Job"]];
+
+  const schemaSnippet = `-- Run in Supabase SQL Editor
+-- Tables: companies, seeker_profiles, jobs,
+--         verifications, applications, saved_jobs
+-- Full schema: see supabase/schema.sql in your project`;
+
+  const apiSnippet = `import { fetchActiveJobs, verifyJob,
+  applyToJob, saveJob } from './supabase/api.js';
+
+// Browse active, verified listings
+const jobs = await fetchActiveJobs({
+  remote: 'remote',
+  freshness: 3,   // verified in last 3 days
+});
+
+// Company verifies a listing (resets 7-day clock)
+await verifyJob(jobId);
+
+// Seeker applies
+await applyToJob(jobId, 'Cover note...');`;
+
+  const cronSnippet = `-- Schedule daily expiry check at 3am UTC
+select cron.schedule(
+  'expire-unverified-jobs',
+  '0 3 * * *',
+  $$ select net.http_post(
+    url := 'https://YOUR_PROJECT.supabase.co
+            /functions/v1/check-expirations',
+    headers := '{"Authorization":
+      "Bearer SERVICE_ROLE_KEY"}'::jsonb
+  ) $$
+);`;
+
+  const content = { connect: null, schema: schemaSnippet, api: apiSnippet, cron: cronSnippet };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"var(--wq-modal-overlay)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:200, backdropFilter:"blur(6px)", padding:20 }}>
+      <div style={{ background:"var(--wq-surface)", borderRadius:20, width:600, maxHeight:"88vh", display:"flex", flexDirection:"column", boxShadow:"0 32px 80px rgba(0,0,0,0.25)", overflow:"hidden" }}>
+
+        {/* Header */}
+        <div style={{ padding:"22px 26px 0", flexShrink:0 }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18 }}>
+            <div>
+              <div style={{ fontFamily:"Sora,sans-serif", fontWeight:700, fontSize:17, color:"var(--wq-text)" }}>Connect Your Backend</div>
+              <div style={{ fontSize:12, color:"var(--wq-muted)", marginTop:2 }}>WorkQuest uses Supabase — a free Postgres backend with auth and realtime</div>
+            </div>
+            <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", color:"var(--wq-faint)", fontSize:20 }}>✕</button>
+          </div>
+          {/* Tabs */}
+          <div style={{ display:"flex", gap:0, borderBottom:"1.5px solid var(--wq-border)" }}>
+            {tabs.map(([id, label]) => (
+              <button key={id} onClick={() => setTab(id)} style={{ background:"none", border:"none", borderBottom: tab===id ? "2.5px solid var(--wq-accent)" : "2.5px solid transparent", marginBottom:-1.5, padding:"8px 16px", fontSize:12, fontWeight: tab===id ? 700 : 400, color: tab===id ? "var(--wq-accent)" : "var(--wq-faint)", cursor:"pointer", transition:"all 0.15s" }}>{label}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex:1, overflowY:"auto", padding:"22px 26px" }}>
+
+          {tab === "connect" && (
+            <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+              {/* Status */}
+              <div style={{ display:"flex", alignItems:"center", gap:10, background: connected ? "#d1fae5" : "var(--wq-chip)", borderRadius:12, padding:"12px 16px" }}>
+                <div style={{ width:10, height:10, borderRadius:"50%", background: connected ? "#10b981" : "#f59e0b", flexShrink:0 }} />
+                <div>
+                  <div style={{ fontSize:13, fontWeight:600, color: connected ? "#065f46" : "var(--wq-text)" }}>{connected ? "Connected to Supabase" : "Not connected — running demo data"}</div>
+                  <div style={{ fontSize:11, color: connected ? "#10b981" : "var(--wq-muted)" }}>{connected ? "Real jobs and companies will load from your database" : "Paste your project credentials below to connect"}</div>
+                </div>
+              </div>
+
+              {/* Steps */}
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                {[
+                  { n:1, label:"Create a free Supabase project", link:"https://supabase.com", linkLabel:"supabase.com →" },
+                  { n:2, label:"Run the schema (SQL Editor → paste supabase/schema.sql)", link:null },
+                  { n:3, label:"Paste your credentials below", link:null },
+                  { n:4, label:"Deploy the edge function for auto-expiry", link:null },
+                ].map(s => (
+                  <div key={s.n} style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
+                    <div style={{ width:24, height:24, borderRadius:"50%", background:"var(--wq-accent-bg)", color:"var(--wq-accent)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:700, flexShrink:0 }}>{s.n}</div>
+                    <div style={{ flex:1, fontSize:13, color:"var(--wq-muted)", paddingTop:3, lineHeight:1.5 }}>
+                      {s.label}{" "}
+                      {s.link && <a href={s.link} target="_blank" rel="noreferrer" style={{ color:"var(--wq-accent)", textDecoration:"none", fontWeight:600 }}>{s.linkLabel}</a>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Credentials inputs */}
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                {[["Project URL", url, setUrl, "https://xxxx.supabase.co"], ["Anon Public Key", key, setKey, "eyJhbGci..."]].map(([label, val, setter, ph]) => (
+                  <div key={label}>
+                    <label style={{ fontSize:11, fontWeight:700, color:"var(--wq-faint)", textTransform:"uppercase", letterSpacing:0.8, display:"block", marginBottom:6 }}>{label}</label>
+                    <input value={val} onChange={e => setter(e.target.value)} placeholder={ph}
+                      style={{ width:"100%", padding:"10px 13px", border:"1.5px solid var(--wq-border)", borderRadius:10, fontSize:13, color:"var(--wq-text)", fontFamily:"DM Sans,monospace", boxSizing:"border-box", outline:"none", background:"var(--wq-input-bg)" }}
+                      onFocus={e => e.target.style.borderColor = "var(--wq-accent)"}
+                      onBlur={e => e.target.style.borderColor = "var(--wq-border)"} />
+                  </div>
+                ))}
+              </div>
+
+              {/* Error message */}
+              {status === 'error' && (
+                <div style={{ background:"#fee2e2", border:"1.5px solid #fecaca", borderRadius:10, padding:"11px 14px", fontSize:12, color:"#991b1b" }}>
+                  ❌ {errMsg || 'Could not connect. Check your URL and key.'}
+                </div>
+              )}
+
+              <div style={{ background:"var(--wq-accent-bg)", borderRadius:10, padding:"12px 14px", fontSize:12, color:"var(--wq-accent-text)", lineHeight:1.6 }}>
+                <strong>Note:</strong> The anon key is safe to use in the browser — it's scoped by Row Level Security policies in the schema. Never paste your <em>service role key</em> here.
+              </div>
+
+              <button
+                onClick={handleConnect}
+                disabled={status === 'loading'}
+                style={{ background: connected ? "#10b981" : "var(--wq-accent)", color:"#fff", border:"none", borderRadius:10, padding:"12px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"Sora,sans-serif", opacity: status === 'loading' ? 0.7 : 1, transition:"background 0.2s" }}>
+                {status === 'loading' ? "Connecting…" : connected ? "✓ Connected — click to re-test" : "Save & Connect"}
+              </button>
+
+              {connected && (
+                <button onClick={onClose} style={{ background:"var(--wq-chip)", color:"var(--wq-muted)", border:"none", borderRadius:10, padding:"11px", fontSize:13, fontWeight:600, cursor:"pointer" }}>
+                  Close and sign in →
+                </button>
+              )}
+            </div>
+          )}
+
+          {tab !== "connect" && (
+            <div>
+              <div style={{ fontSize:13, color:"var(--wq-muted)", marginBottom:14, lineHeight:1.6 }}>
+                {tab === "schema" && "The full schema is in supabase/schema.sql. Here's what gets created:"}
+                {tab === "api" && "Import functions from supabase/api.js — every query the app needs is already written:"}
+                {tab === "cron" && "The edge function at supabase/functions/check-expirations/index.ts runs daily. Schedule it with pg_cron:"}
+              </div>
+
+              {tab === "schema" && (
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
+                  {[
+                    ["companies","Company accounts + profile"],
+                    ["seeker_profiles","Job seeker profile + preferences"],
+                    ["jobs","Listings with verification timestamps"],
+                    ["verifications","Audit log of every weekly check-in"],
+                    ["applications","Seeker ↔ job applications"],
+                    ["saved_jobs","Bookmarked listings"],
+                  ].map(([table, desc]) => (
+                    <div key={table} style={{ background:"var(--wq-surface2)", borderRadius:10, padding:"12px 14px" }}>
+                      <div style={{ fontFamily:"monospace", fontSize:12, fontWeight:700, color:"var(--wq-accent)", marginBottom:3 }}>{table}</div>
+                      <div style={{ fontSize:11, color:"var(--wq-muted)" }}>{desc}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <pre style={{ background:"var(--wq-surface2)", border:"1.5px solid var(--wq-border)", borderRadius:12, padding:"16px 18px", fontSize:12, color:"var(--wq-text)", overflowX:"auto", lineHeight:1.7, margin:0, whiteSpace:"pre-wrap", fontFamily:"monospace" }}>
+                {content[tab]}
+              </pre>
+
+              <div style={{ marginTop:14, fontSize:12, color:"var(--wq-faint)" }}>
+                Full file: <code style={{ background:"var(--wq-chip)", padding:"2px 7px", borderRadius:5, color:"var(--wq-accent)" }}>supabase/{tab === "schema" ? "schema.sql" : tab === "api" ? "api.js" : "functions/check-expirations/index.ts"}</code>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Auth Modal ────────────────────────────────────────────────
+// Input + Btn defined OUTSIDE AuthModal so React doesn't remount them on each render
+function AuthInput({ value, onChange, placeholder, type = "text" }) {
+  return (
+    <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+      style={{ width:"100%", padding:"11px 14px", border:"1.5px solid var(--wq-border)", borderRadius:10, fontSize:14, color:"var(--wq-text)", fontFamily:"DM Sans,sans-serif", boxSizing:"border-box", outline:"none", background:"var(--wq-input-bg)", transition:"border-color 0.15s" }}
+      onFocus={e => e.target.style.borderColor = "var(--wq-accent)"}
+      onBlur={e => e.target.style.borderColor = "var(--wq-border)"} />
+  );
+}
+
+function AuthBtn({ label, onClick, secondary, disabled }) {
+  return (
+    <button onClick={onClick} disabled={disabled} style={{ width:"100%", background: secondary ? "var(--wq-chip)" : "var(--wq-accent)", color: secondary ? "var(--wq-muted)" : "#fff", border:"none", borderRadius:10, padding:"12px", fontSize:14, fontWeight:600, cursor: disabled ? "not-allowed" : "pointer", fontFamily:"Sora,sans-serif", opacity: disabled ? 0.7 : 1, transition:"all 0.15s" }}>
+      {label}
+    </button>
+  );
+}
+
+function AuthModal({ onClose, currentUser, onSignOut }) {
+  const [tab, setTab] = React.useState(currentUser ? "account" : "signin");
+  const [email, setEmail] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [status, setStatus] = React.useState("idle"); // idle | loading | success | error
+  const [msg, setMsg] = React.useState("");
+
+  const sb = getSupabase();
+  const noBackend = !sb;
+
+  // Friendly error messages for common Supabase auth errors
+  function friendlyError(msg) {
+    if (!msg) return "Something went wrong. Please try again.";
+    if (msg.includes("Invalid login credentials")) return "Incorrect email or password. Double-check and try again.";
+    if (msg.includes("Email not confirmed")) return "Please confirm your email first — check your inbox for a verification link.";
+    if (msg.includes("User already registered")) return "An account with this email already exists. Try signing in instead.";
+    if (msg.includes("Password should be")) return "Password must be at least 6 characters.";
+    if (msg.includes("Unable to validate")) return "Invalid credentials. Make sure your Supabase URL and key are correct.";
+    if (msg.includes("not enabled")) return "This sign-in method isn't enabled yet in your Supabase project. Go to Authentication → Providers to enable it.";
+    if (msg.includes("fetch") || msg.includes("network")) return "Can't reach Supabase. Check your Project URL is correct.";
+    return msg;
+  }
+
+  async function handleSignIn() {
+    if (noBackend) { setStatus("error"); setMsg("You're in demo mode — connect your Supabase backend first by clicking 'Demo mode · Connect' in the nav bar."); return; }
+    if (!email || !password) { setStatus("error"); setMsg("Please enter your email and password."); return; }
+    setStatus("loading"); setMsg("");
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) { setStatus("error"); setMsg(friendlyError(error.message)); }
+    else { setStatus("success"); setMsg("Signed in!"); setTimeout(onClose, 800); }
+  }
+
+  async function handleSignUp() {
+    if (noBackend) { setStatus("error"); setMsg("You're in demo mode — connect your Supabase backend first by clicking 'Demo mode · Connect' in the nav bar."); return; }
+    if (!email || !password) { setStatus("error"); setMsg("Please enter your email and password."); return; }
+    setStatus("loading"); setMsg("");
+    const { data, error } = await sb.auth.signUp({ email, password });
+    if (error) { setStatus("error"); setMsg(friendlyError(error.message)); }
+    else if (data?.user?.identities?.length === 0) { setStatus("error"); setMsg("An account with this email already exists. Try signing in instead."); }
+    else { setStatus("success"); setMsg("Account created! Check your inbox for a confirmation link, then sign in."); }
+  }
+
+  async function handleResendConfirmation() {
+    if (!email || !sb) return;
+    setStatus("loading");
+    const { error } = await sb.auth.resend({ type: "signup", email });
+    if (error) { setStatus("error"); setMsg(friendlyError(error.message)); }
+    else { setStatus("success"); setMsg("Confirmation email resent — check your inbox."); }
+  }
+
+  async function handleGoogleSignIn() {
+    if (noBackend) { setStatus("error"); setMsg("Connect your Supabase backend first, then enable Google under Authentication → Providers."); return; }
+    const redirectTo = `${getStoredCreds().url.replace('.supabase.co','')}.supabase.co/auth/v1/callback`;
+    const { error } = await sb.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin + window.location.pathname }
+    });
+    if (error) { setStatus("error"); setMsg(friendlyError(error.message)); }
+  }
+
+  async function handleForgotPassword() {
+    if (noBackend) { setStatus("error"); setMsg("Connect your Supabase backend first."); return; }
+    if (!email) { setStatus("error"); setMsg("Enter your email above first."); return; }
+    setStatus("loading");
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.href });
+    if (error) { setStatus("error"); setMsg(friendlyError(error.message)); }
+    else { setStatus("success"); setMsg("Password reset email sent — check your inbox."); }
+  }
+
+  const isEmailNotConfirmed = status === "error" && msg.includes("confirm your email");
+
+  // Use AuthInput and AuthBtn (defined outside this component to avoid remount bug)
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"var(--wq-modal-overlay)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:200, backdropFilter:"blur(6px)" }}>
+      <div style={{ background:"var(--wq-surface)", borderRadius:20, width:420, boxShadow:"0 32px 80px rgba(0,0,0,0.25)", overflow:"hidden" }}>
+
+        {/* Header */}
+        <div style={{ padding:"24px 28px 0" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+            <Logo />
+            <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", color:"var(--wq-faint)", fontSize:20 }}>✕</button>
+          </div>
+
+          {/* Tabs */}
+          {!currentUser && (
+            <div style={{ display:"flex", borderBottom:"1.5px solid var(--wq-border)" }}>
+              {[["signin","Sign In"],["signup","Create Account"]].map(([id,label]) => (
+                <button key={id} onClick={() => { setTab(id); setStatus("idle"); setMsg(""); }} style={{ flex:1, background:"none", border:"none", borderBottom: tab===id ? "2.5px solid var(--wq-accent)" : "2.5px solid transparent", marginBottom:-1.5, padding:"10px 0", fontSize:13, fontWeight: tab===id ? 700 : 400, color: tab===id ? "var(--wq-accent)" : "var(--wq-faint)", cursor:"pointer" }}>{label}</button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding:"22px 28px 28px", display:"flex", flexDirection:"column", gap:14 }}>
+
+          {/* Already signed in */}
+          {currentUser && (
+            <div style={{ textAlign:"center" }}>
+              <div style={{ width:60, height:60, borderRadius:"50%", background:"#10b981", display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 14px", fontSize:22, fontWeight:700, color:"#fff", fontFamily:"Sora,sans-serif" }}>
+                {(currentUser.email||'').substring(0,2).toUpperCase()}
+              </div>
+              <div style={{ fontFamily:"Sora,sans-serif", fontWeight:700, fontSize:17, color:"var(--wq-text)", marginBottom:4 }}>Signed in</div>
+              <div style={{ fontSize:13, color:"var(--wq-muted)", marginBottom:20 }}>{currentUser.email}</div>
+              <button onClick={onSignOut} style={{ background:"#fee2e2", color:"#991b1b", border:"none", borderRadius:10, padding:"11px 24px", fontSize:13, fontWeight:600, cursor:"pointer" }}>Sign out</button>
+            </div>
+          )}
+
+          {/* No backend warning — block the form */}
+          {!currentUser && noBackend && (
+            <div style={{ background:"#fffbeb", border:"1.5px solid #fde68a", borderRadius:12, padding:"14px 16px" }}>
+              <div style={{ fontWeight:700, fontSize:13, color:"#92400e", marginBottom:4 }}>⚠️ Not connected to a backend</div>
+              <div style={{ fontSize:12, color:"#b45309", lineHeight:1.6, marginBottom:10 }}>
+                You're running demo data. To create real accounts and sign in, connect your Supabase project first.
+              </div>
+              <button onClick={() => { onClose(); setTimeout(() => document.querySelector('[data-connect-btn]')?.click(), 100); }}
+                style={{ background:"#f59e0b", color:"#fff", border:"none", borderRadius:8, padding:"8px 14px", fontSize:12, fontWeight:600, cursor:"pointer" }}>
+                Connect backend →
+              </button>
+            </div>
+          )}
+
+          {/* Sign In form */}
+          {!currentUser && tab === "signin" && (
+            <>
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                <AuthInput value={email} onChange={setEmail} placeholder="you@email.com" />
+                <AuthInput value={password} onChange={setPassword} placeholder="Password" type="password" />
+              </div>
+              <button onClick={() => { setTab("forgot"); setStatus("idle"); setMsg(""); }} style={{ background:"none", border:"none", cursor:"pointer", color:"var(--wq-accent)", fontSize:12, textAlign:"right", padding:0 }}>Forgot password?</button>
+              <AuthBtn label={status==="loading"?"Please wait…":"Sign In →"} onClick={handleSignIn} disabled={status==="loading"} />
+              <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{ flex:1, height:1, background:"var(--wq-border)" }} />
+                <span style={{ fontSize:11, color:"var(--wq-faint)" }}>or</span>
+                <div style={{ flex:1, height:1, background:"var(--wq-border)" }} />
+              </div>
+              <button onClick={handleGoogleSignIn} style={{ width:"100%", background:"var(--wq-surface2)", border:"1.5px solid var(--wq-border)", borderRadius:10, padding:"11px", fontSize:13, fontWeight:500, cursor:"pointer", color:"var(--wq-text)", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                Continue with Google
+              </button>
+            </>
+          )}
+
+          {/* Sign Up form */}
+          {!currentUser && tab === "signup" && (
+            <>
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                <AuthInput value={email} onChange={setEmail} placeholder="you@email.com" />
+                <AuthInput value={password} onChange={setPassword} placeholder="Choose a password (8+ chars)" type="password" />
+              </div>
+              <div style={{ fontSize:11, color:"var(--wq-faint)", lineHeight:1.6 }}>
+                By signing up you agree to WorkQuest's terms. We'll never share your data.
+              </div>
+              <AuthBtn label={status==="loading"?"Please wait…":"Create Account →"} onClick={handleSignUp} disabled={status==="loading"} />
+              <button onClick={handleGoogleSignIn} style={{ width:"100%", background:"var(--wq-surface2)", border:"1.5px solid var(--wq-border)", borderRadius:10, padding:"11px", fontSize:13, fontWeight:500, cursor:"pointer", color:"var(--wq-text)", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                Sign up with Google
+              </button>
+            </>
+          )}
+
+          {/* Forgot password */}
+          {!currentUser && tab === "forgot" && (
+            <>
+              <div style={{ fontSize:13, color:"var(--wq-muted)" }}>Enter your email and we'll send a reset link.</div>
+              <AuthInput value={email} onChange={setEmail} placeholder="you@email.com" />
+              <AuthBtn label={status==="loading"?"Please wait…":"Send Reset Link"} onClick={handleForgotPassword} disabled={status==="loading"} />
+              <button onClick={() => { setTab("signin"); setStatus("idle"); setMsg(""); }} style={{ background:"none", border:"none", cursor:"pointer", color:"var(--wq-accent)", fontSize:13, fontWeight:500 }}>← Back to sign in</button>
+            </>
+          )}
+
+          {/* Status message */}
+          {msg && (
+            <div style={{ background: status==="error" ? "#fee2e2" : "#d1fae5", border:`1.5px solid ${status==="error"?"#fecaca":"#6ee7b7"}`, borderRadius:10, padding:"10px 14px", fontSize:12, color: status==="error" ? "#991b1b" : "#065f46", lineHeight:1.5 }}>
+              {status === "error" ? "❌ " : "✓ "}{msg}
+            </div>
+          )}
+
+          {/* Resend confirmation email helper */}
+          {isEmailNotConfirmed && (
+            <button onClick={handleResendConfirmation} style={{ background:"var(--wq-accent-bg)", color:"var(--wq-accent)", border:"none", borderRadius:9, padding:"9px 14px", fontSize:12, fontWeight:600, cursor:"pointer" }}>
+              Resend confirmation email →
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const [seekerTab, setSeekerTab] = React.useState("browse");
+  const [companyTab, setCompanyTab] = React.useState("dashboard");
+  const [showSupabase, setShowSupabase] = React.useState(false);
+  const [showAuth, setShowAuth] = React.useState(false);
+  const [currentUser, setCurrentUser] = React.useState(null);
+  const [isConnected, setIsConnected] = React.useState(!!getStoredCreds().url && !!getStoredCreds().key);
+
+  // Listen for auth state changes from Supabase
+  React.useEffect(() => {
+    const sb = getSupabase();
+    if (!sb) return;
+    sb.auth.getSession().then(({ data }) => {
+      setCurrentUser(data?.session?.user ?? null);
+    });
+    const { data: { subscription } } = sb.auth.onAuthStateChange((_evt, session) => {
+      setCurrentUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, [isConnected]);
+
+  React.useEffect(() => {
+    document.documentElement.setAttribute("data-theme", tweaks.theme);
+    document.body.style.background = "var(--wq-bg)";
+  }, [tweaks.theme]);
+
+  React.useEffect(() => {
+    document.documentElement.style.setProperty("--wq-accent", tweaks.accentColor);
+  }, [tweaks.accentColor]);
+
+  const isCompany = tweaks.view === "company";
+  const seekerTabs = [["browse","Browse Jobs"],["saved","Saved"],["profile","My Profile"]];
+  const companyTabs = [["dashboard","Dashboard"],["listings","Listings","1"],["applicants","Applicants"]];
+
+  // User initials for avatar
+  const userInitials = currentUser
+    ? (currentUser.email || '').substring(0, 2).toUpperCase()
+    : (isCompany ? "AC" : "AJ");
+
+  const mainContent = () => {
+    if (isCompany) {
+      if (companyTab === "dashboard" || companyTab === "listings") return <CompanyView />;
+      if (companyTab === "applicants") return <ApplicantsView />;
+    } else {
+      if (seekerTab === "browse") return <JobSeekerView />;
+      if (seekerTab === "saved") return <SavedView />;
+      if (seekerTab === "profile") return <ProfileView />;
+    }
+  };
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", height:"100vh", background:"var(--wq-bg)" }}>
+      <nav style={{ height:60, background:"var(--wq-surface)", borderBottom:"1.5px solid var(--wq-border-light)", display:"flex", alignItems:"center", padding:"0 24px", gap:20, flexShrink:0, zIndex:20 }}>
+        <Logo />
+        <div style={{ flex:1, display:"flex", justifyContent:"center", gap:2 }}>
+          {(isCompany ? companyTabs : seekerTabs).map(([id,label,badge]) => (
+            <NavItem key={id} label={label} badge={badge}
+              active={isCompany ? companyTab===id : seekerTab===id}
+              onClick={() => isCompany ? setCompanyTab(id) : setSeekerTab(id)} />
+          ))}
+        </div>
+
+        {/* View switcher */}
+        <div style={{ display:"flex", background:"var(--wq-chip)", borderRadius:10, padding:3, gap:2 }}>
+          {[["seeker","Job Seeker"],["company","Company"]].map(([id,label]) => (
+            <button key={id} onClick={() => setTweak("view",id)} style={{ background:tweaks.view===id?"var(--wq-surface)":"transparent", border:"none", borderRadius:8, padding:"5px 12px", fontSize:12, fontWeight:tweaks.view===id?600:400, color:tweaks.view===id?"var(--wq-text)":"var(--wq-faint)", cursor:"pointer", transition:"all 0.15s", boxShadow:tweaks.view===id?"0 1px 4px rgba(0,0,0,0.08)":"none" }}>{label}</button>
+          ))}
+        </div>
+
+        {/* Connection status chip */}
+        <button onClick={() => setShowSupabase(true)} data-connect-btn style={{ display:"flex", alignItems:"center", gap:6, background:"var(--wq-chip)", border:"1.5px solid var(--wq-border)", borderRadius:20, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:600, color:"var(--wq-muted)" }}>
+          <div style={{ width:7, height:7, borderRadius:"50%", background: isConnected ? "#10b981" : "#f59e0b" }} />
+          {isConnected ? (currentUser ? `Signed in as ${currentUser.email?.split('@')[0]}` : "Connected") : "Demo mode · Connect"}
+        </button>
+
+        {/* Avatar → opens auth */}
+        <div onClick={() => setShowAuth(true)} style={{ width:34, height:34, borderRadius:"50%", background: currentUser ? "#10b981" : isCompany ? "linear-gradient(135deg,#f59e0b,#ef4444)" : "linear-gradient(135deg,var(--wq-accent),#8b5cf6)", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"Sora,sans-serif" }}>{userInitials}</div>
+      </nav>
+
+      <div style={{ flex:1, overflow:"hidden", position:"relative" }}>
+        {mainContent()}
+      </div>
+
+      {showSupabase && <SupabaseModal onClose={() => setShowSupabase(false)} onConnected={() => setIsConnected(true)} />}
+      {showAuth && <AuthModal onClose={() => setShowAuth(false)} currentUser={currentUser} onSignOut={() => { getSupabase()?.auth.signOut(); setShowAuth(false); }} />}
+
+      <TweaksPanel>
+        <TweakSection title="View">
+          <TweakRadio id="view" label="Mode" value={tweaks.view} options={[{value:"seeker",label:"Job Seeker"},{value:"company",label:"Company"}]} onChange={v=>setTweak("view",v)} />
+        </TweakSection>
+        <TweakSection title="Appearance">
+          <TweakRadio id="theme" label="Theme" value={tweaks.theme} options={[{value:"light",label:"Light"},{value:"dark",label:"Dark"}]} onChange={v=>setTweak("theme",v)} />
+          <TweakColor id="accentColor" label="Accent" value={tweaks.accentColor} onChange={v=>setTweak("accentColor",v)} />
+        </TweakSection>
+      </TweaksPanel>
+    </div>
+  );
+}
+
+function PlaceholderView({ name }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12, color: "var(--wq-faint)" }}>
+      <div style={{ fontSize: 36 }}>🚧</div>
+      <div style={{ fontFamily: "Sora, sans-serif", fontWeight: 600, fontSize: 16, color: "var(--wq-muted)" }}>{name}</div>
+      <div style={{ fontSize: 13 }}>This screen is part of the full build</div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
