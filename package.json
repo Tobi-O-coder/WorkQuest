@@ -7,6 +7,7 @@
     "start": "cross-env ELECTRON_RUN_AS_NODE= electron .",
     "start:win": "set ELECTRON_RUN_AS_NODE= && electron .",
     "build": "node build.js",
+    "icon": "node scripts/generate-icon.js",
     "cap:sync": "npm run build && npx cap sync",
     "cap:android": "npm run build && npx cap open android",
     "cap:ios": "npm run build && npx cap open ios",
@@ -80,6 +81,8 @@
     "@capacitor/cli": "^7.0.0",
     "cross-env": "^10.1.0",
     "electron": "^33.0.0",
-    "electron-builder": "^25.0.0"
+    "electron-builder": "^25.0.0",
+    "png-to-ico": "^3.0.1",
+    "sharp": "^0.34.5"
   }
 }
