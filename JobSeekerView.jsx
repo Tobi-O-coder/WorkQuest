@@ -603,6 +603,36 @@ function ProfileView() {
   const [editing, setEditing] = React.useState(false);
   const [profile, setProfile] = React.useState(null);
   const [saving, setSaving] = React.useState(false);
+  const [uploading, setUploading] = React.useState(false);
+  const [uploadMsg, setUploadMsg] = React.useState(null); // { type: 'ok'|'err', text }
+  const fileInputRef = React.useRef(null);
+
+  async function handleResumeUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!window.WQApi || !getSupabase()) {
+      setUploadMsg({ type:'err', text:'Connect your Supabase backend first.' });
+      return;
+    }
+    if (file.type !== 'application/pdf' && !file.name.endsWith('.pdf')) {
+      setUploadMsg({ type:'err', text:'Please upload a PDF file.' });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadMsg({ type:'err', text:'File too large — maximum 5 MB.' });
+      return;
+    }
+    setUploading(true); setUploadMsg(null);
+    try {
+      const url = await WQApi.uploadResume(file);
+      setProfile(prev => prev ? { ...prev, resume_url: url } : { resume_url: url });
+      setUploadMsg({ type:'ok', text:`${file.name} uploaded successfully.` });
+    } catch(err) {
+      setUploadMsg({ type:'err', text: err.message || 'Upload failed. Try again.' });
+    }
+    setUploading(false);
+    e.target.value = ''; // reset input so same file can be re-selected
+  }
 
   React.useEffect(() => {
     if (window.WQApi && getSupabase()) {
@@ -710,15 +740,31 @@ function ProfileView() {
         )}
 
         {/* Resume */}
-        <div style={{ background:"var(--wq-surface)", border:"1.5px dashed var(--wq-border)", borderRadius:14, padding:"18px 22px", display:"flex", alignItems:"center", gap:12 }}>
-          <div style={{ fontSize:26 }}>📄</div>
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontFamily:"Sora,sans-serif", fontWeight:600, fontSize:13, color:"var(--wq-text)" }}>{p.resume_url ? "Resume uploaded ✓" : "No resume uploaded"}</div>
-            <div style={{ fontSize:12, color:"var(--wq-muted)" }}>{p.resume_url ? "Attached automatically to applications" : "Upload a PDF to attach to applications"}</div>
+        <div style={{ background:"var(--wq-surface)", border:`1.5px ${p.resume_url ? "solid" : "dashed"} var(--wq-border)`, borderRadius:14, padding:"18px 22px" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+            <div style={{ fontSize:26 }}>📄</div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontFamily:"Sora,sans-serif", fontWeight:600, fontSize:13, color:"var(--wq-text)" }}>
+                {p.resume_url ? "Resume uploaded ✓" : "No resume uploaded"}
+              </div>
+              <div style={{ fontSize:12, color:"var(--wq-muted)" }}>
+                {p.resume_url ? "PDF · Attached automatically to applications" : "Upload a PDF (max 5 MB)"}
+              </div>
+            </div>
+            <input ref={fileInputRef} type="file" accept=".pdf,application/pdf" style={{ display:"none" }} onChange={handleResumeUpload} />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              style={{ background: uploading ? "var(--wq-chip)" : p.resume_url ? "var(--wq-chip)" : "var(--wq-accent)", color: uploading ? "var(--wq-faint)" : p.resume_url ? "var(--wq-muted)" : "#fff", border:"none", borderRadius:9, padding:"9px 14px", fontSize:12, fontWeight:600, cursor: uploading ? "not-allowed" : "pointer", flexShrink:0, transition:"all 0.15s" }}>
+              {uploading ? "Uploading…" : p.resume_url ? "Replace" : "Upload PDF"}
+            </button>
           </div>
-          <button style={{ background:"var(--wq-chip)", color:"var(--wq-muted)", border:"none", borderRadius:9, padding:"8px 13px", fontSize:12, fontWeight:600, cursor:"pointer", flexShrink:0 }}>
-            {p.resume_url ? "Replace" : "Upload"}
-          </button>
+          {/* Upload status message */}
+          {uploadMsg && (
+            <div style={{ marginTop:10, background: uploadMsg.type==='ok' ? "#d1fae5" : "#fee2e2", border:`1px solid ${uploadMsg.type==='ok' ? "#6ee7b7" : "#fecaca"}`, borderRadius:8, padding:"8px 12px", fontSize:12, color: uploadMsg.type==='ok' ? "#065f46" : "#991b1b" }}>
+              {uploadMsg.type==='ok' ? "✓ " : "❌ "}{uploadMsg.text}
+            </div>
+          )}
         </div>
       </div>
     </div>

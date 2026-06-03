@@ -205,3 +205,39 @@ create policy "Seekers can manage own saved jobs"
   with check (auth.uid() = seeker_id);
 
 create index saved_jobs_seeker_id_idx on public.saved_jobs (seeker_id);
+
+-- ─── STORAGE: RESUMES ─────────────────────────────────────────────────────────
+-- Run in SQL Editor after enabling Storage in your Supabase project.
+-- Files are stored as: resumes/{user_id}/resume.pdf
+
+insert into storage.buckets (id, name, public)
+values ('resumes', 'resumes', true)
+on conflict (id) do nothing;
+
+-- Seekers can upload / replace their own resume
+create policy "Seekers can upload own resume"
+  on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'resumes' AND
+    (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+create policy "Seekers can replace own resume"
+  on storage.objects for update to authenticated
+  using (
+    bucket_id = 'resumes' AND
+    (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+create policy "Seekers can delete own resume"
+  on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'resumes' AND
+    (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- Public read (bucket is public — anyone with the URL can view)
+-- This lets companies see applicant resumes via the stored URL
+create policy "Resumes are publicly readable"
+  on storage.objects for select
+  using (bucket_id = 'resumes');

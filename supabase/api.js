@@ -260,6 +260,41 @@
     return data;
   }
 
+  // ─── RESUME STORAGE ────────────────────────────────────────────────────────
+
+  async function uploadResume(file) {
+    const user = await currentUser();
+    const filePath = `${user.id}/resume.pdf`;
+
+    const { error: uploadError } = await db()
+      .storage
+      .from('resumes')
+      .upload(filePath, file, { upsert: true, contentType: 'application/pdf' });
+
+    if (uploadError) throw uploadError;
+
+    // Bucket is public — get a permanent URL
+    const { data: { publicUrl } } = db()
+      .storage
+      .from('resumes')
+      .getPublicUrl(filePath);
+
+    // Persist the URL on the seeker profile
+    await upsertSeekerProfile({ resume_url: publicUrl });
+
+    return publicUrl;
+  }
+
+  async function deleteResume() {
+    const user = await currentUser();
+    const { error } = await db()
+      .storage
+      .from('resumes')
+      .remove([`${user.id}/resume.pdf`]);
+    if (error) throw error;
+    await upsertSeekerProfile({ resume_url: null });
+  }
+
   // ─── Expose as global ──────────────────────────────────────────────────────
   window.WQApi = {
     fetchActiveJobs,
@@ -281,6 +316,8 @@
     upsertSeekerProfile,
     getCompanyProfile,
     upsertCompanyProfile,
+    uploadResume,
+    deleteResume,
   };
 
 })();
